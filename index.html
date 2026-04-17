@@ -1,0 +1,1266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Apex Lense</title>
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- TensorFlow.js and COCO-SSD for Car Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <!-- Leaflet.js for Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { background-color: #000; color: white; font-family: sans-serif; overflow: hidden; margin: 0; }
+        
+        /* Viewfinder: Fills any screen shape (Phone or Tablet) */
+        #viewfinder { 
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
+            object-fit: cover; z-index: -1; background: #111;
+            will-change: transform;
+            image-rendering: -webkit-optimize-contrast;
+        }
+
+        #stab-canvas {
+            display: none; /* Only show when needed */
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            object-fit: cover; z-index: -1;
+            will-change: contents;
+        }
+        
+        .recording-dot { animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.2; } 100% { opacity: 1; } }
+
+        /* Centered Bottom Controls */
+        .controls-bar {
+            position: fixed; bottom: 1rem; left: 0; right: 0;
+            display: flex; justify-content: center; align-items: center; gap: 0.75rem;
+            z-index: 20;
+            padding: 0 1rem;
+            transition: opacity 0.3s ease;
+        }
+        @media (min-width: 640px) {
+            .controls-bar { bottom: 2rem; gap: 1.5rem; }
+        }
+
+        /* Responsive Stats Header */
+        .stats-header {
+            position: fixed; top: 1rem; left: 1rem; right: 1rem;
+            display: flex; justify-content: space-between; align-items: flex-start;
+            z-index: 20;
+            transition: opacity 0.3s ease;
+        }
+
+        .ui-hidden .stats-header,
+        .ui-hidden .controls-bar {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="setup-screen" class="fixed inset-0 bg-[#050505] z-50 flex flex-col items-center justify-center">
+        <div class="absolute top-4 w-full px-4 max-w-md">
+            <div id="apex-tip-container" style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 15px; margin: 20px 0; font-family: sans-serif; border-left: 4px solid #ff0000; color: #eee;">
+                <div id="tip-text" style="font-size: 0.9rem; margin-bottom: 8px; line-height: 1.4;"></div>
+                <a id="tip-link" href="#" target="_blank" style="color: #ff4d4d; text-decoration: none; font-weight: bold; font-size: 0.85rem; text-transform: uppercase;"></a>
+            </div>
+        </div>
+
+        <h1 class="text-4xl font-black mb-4 tracking-tighter">APEX LENSE</h1>
+        <button id="install-pwa-btn" class="mb-8 bg-blue-600 text-white px-6 py-2 rounded-full font-bold text-sm hover:bg-blue-500 active:scale-95 transition-all flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            DOWNLOAD APP
+        </button>
+        <button id="start-journey-btn" class="bg-red-700 text-white px-12 py-6 rounded-full font-black text-2xl hover:bg-red-600 active:scale-95 transition-all shadow-[0_0_40px_rgba(185,28,28,0.4)]">
+            START JOURNEY
+        </button>
+
+        <p class="mt-6 text-gray-400 text-sm text-center max-w-xs">Grants camera, microphone, and location permissions to begin.</p>
+
+        <div class="absolute bottom-8 flex flex-col items-center w-full px-4 text-center">
+            <p class="text-[10px] text-gray-500 mb-2 uppercase tracking-wider font-bold">As An Amazon Associate I Earn From Qualifying Purchases</p>
+            <a href="https://www.amazon.co.uk/s?k=dashcam+car+mount&tag=motwallet76-21" target="_blank" rel="noopener noreferrer" class="bg-[#FF9900] text-black px-8 py-3 rounded-full font-black text-sm hover:bg-[#e38800] active:scale-95 transition-all shadow-lg flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+                Shop Car Mounts on Amazon
+            </a>
+            <button id="legal-btn" class="mt-4 text-[10px] text-gray-500 uppercase font-bold hover:text-white transition-colors">Legal & Privacy Information</button>
+        </div>
+    </div>
+
+    <video id="viewfinder" autoplay playsinline webkit-playsinline muted preload="auto"></video>
+    <canvas id="stab-canvas" class="fixed top-0 left-0 opacity-0 pointer-events-none z-[-2]"></canvas>
+
+    <div class="stats-header">
+        <div class="glass p-3 rounded-2xl flex items-center gap-3 shrink-0">
+            <div id="rec-indicator" class="w-3 h-3 bg-red-600 rounded-full hidden recording-dot"></div>
+            <span class="font-bold text-xs tracking-tighter" id="status-text">STANDBY</span>
+        </div>
+        
+        <div class="flex gap-2 flex-wrap justify-end max-w-[65%] sm:max-w-none">
+            <button id="eco-toggle" class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px] active:scale-95 transition-transform">
+                <div class="text-[9px] sm:text-[10px] text-green-400 uppercase font-bold">Eco Mode</div>
+                <div id="eco-status" class="text-xs sm:text-sm font-bold text-gray-500">OFF</div>
+            </button>
+            <button id="stab-toggle" class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px] active:scale-95 transition-transform">
+                <div class="text-[9px] sm:text-[10px] text-gray-400 uppercase font-bold">Stabilize</div>
+                <div id="stab-status" class="text-xs sm:text-sm font-bold text-gray-500">OFF</div>
+            </button>
+            <button id="ai-toggle" class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px] active:scale-95 transition-transform">
+                <div class="text-[9px] sm:text-[10px] text-gray-400 uppercase font-bold">AI Detect</div>
+                <div id="ai-status" class="text-xs sm:text-sm font-bold text-gray-500">OFF</div>
+            </button>
+            <div id="parking-indicator" class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px] hidden">
+                <div class="text-[9px] sm:text-[10px] text-yellow-500 uppercase font-bold">Parking</div>
+                <div id="parking-status" class="text-xs sm:text-sm font-bold text-yellow-500">ACTIVE</div>
+            </div>
+            <div id="car-alert" class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px] hidden transition-colors duration-300">
+                <div class="text-[9px] sm:text-[10px] text-gray-400 uppercase font-bold">Cars</div>
+                <div id="car-count" class="text-lg sm:text-xl font-bold text-white">0</div>
+            </div>
+            <div id="pedestrian-alert" class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px] hidden transition-colors duration-300 border-red-500 bg-red-900/40">
+                <div class="text-[9px] sm:text-[10px] text-red-400 uppercase font-bold">Pedestrian</div>
+                <div class="text-xs font-bold text-white">DETECTED</div>
+            </div>
+            <div class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[70px] sm:min-w-[90px]">
+                <div class="text-[9px] sm:text-[10px] text-gray-400 uppercase font-bold">Speed</div>
+                <div class="text-xl sm:text-2xl font-black text-blue-400"><span id="speed-val">0</span> <span class="text-[9px] sm:text-[10px]">km/h</span></div>
+            </div>
+            <div class="glass p-2 sm:p-3 rounded-2xl text-center min-w-[60px] sm:min-w-[70px]">
+                <div class="text-[9px] sm:text-[10px] text-gray-400 uppercase font-bold">G-Force</div>
+                <div id="g-val" class="text-xl sm:text-2xl font-bold text-white">1.0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="controls-bar">
+        <button id="mute-btn" class="glass w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-lg sm:text-xl shrink-0">
+            <span id="mute-icon">🎤</span>
+        </button>
+        
+        <button id="gallery-btn" class="glass w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-lg sm:text-xl shrink-0">
+            📂
+        </button>
+
+        <button id="start-btn" class="w-20 h-20 sm:w-24 sm:h-24 bg-red-700 rounded-full border-4 border-white shadow-2xl flex items-center justify-center text-white font-black text-lg sm:text-xl active:scale-90 transition-transform shrink-0">
+            REC
+        </button>
+
+        <button id="w3w-btn" class="glass w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-red-500 font-bold text-lg sm:text-xl shrink-0">
+            ///
+        </button>
+
+        <button id="hide-ui-btn" class="glass w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-white font-bold text-lg sm:text-xl shrink-0" title="Hide UI">
+            👁️
+        </button>
+
+        <button id="stop-app-btn" class="glass w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center text-red-500 font-bold text-lg sm:text-xl shrink-0" title="Close Dashcam">
+            ✕
+        </button>
+    </div>
+
+    <div id="gallery-modal" class="fixed inset-0 bg-black/95 z-50 hidden overflow-y-auto p-8">
+        <div class="max-w-4xl mx-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-black">LOCAL CLIPS</h2>
+                <button onclick="closeGallery()" class="text-5xl text-gray-400 hover:text-white">&times;</button>
+            </div>
+            
+            <!-- Filters -->
+            <div class="flex flex-wrap gap-4 mb-8 bg-white/5 p-4 rounded-2xl border border-white/10">
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-gray-400 uppercase font-bold mb-1">Date</label>
+                    <input type="date" id="filter-date" class="bg-black border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-gray-400 uppercase font-bold mb-1">Status</label>
+                    <select id="filter-protected" class="bg-black border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                        <option value="all">All Clips</option>
+                        <option value="protected">Protected Only</option>
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-gray-400 uppercase font-bold mb-1">Min Speed</label>
+                    <select id="filter-speed" class="bg-black border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                        <option value="0">Any Speed</option>
+                        <option value="30">> 30 km/h</option>
+                        <option value="60">> 60 km/h</option>
+                        <option value="100">> 100 km/h</option>
+                    </select>
+                </div>
+                <div class="flex flex-col">
+                    <label class="text-[10px] text-gray-400 uppercase font-bold mb-1">View</label>
+                    <select id="gallery-view-toggle" class="bg-black border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500">
+                        <option value="list">List View</option>
+                        <option value="map">Map View</option>
+                    </select>
+                </div>
+                <div class="flex items-end">
+                    <button id="apply-filters-btn" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-lg text-sm font-bold transition-colors h-[38px]">Apply Filters</button>
+                </div>
+            </div>
+
+            <div id="gallery-map" class="w-full h-[50vh] rounded-2xl border-2 border-white/20 shadow-2xl hidden mb-4 z-10"></div>
+            <div id="clip-list" class="space-y-4"></div>
+            
+            <div id="player-container" class="hidden mt-10 flex flex-col gap-4 relative">
+                <div class="relative group">
+                    <video id="player" controls playsinline webkit-playsinline preload="auto" class="w-full rounded-2xl border-2 border-white/20 shadow-2xl"></video>
+                    <!-- Telemetry Overlay -->
+                    <div id="telemetry-overlay" class="absolute top-4 left-4 glass p-3 rounded-xl pointer-events-none flex flex-col gap-1 z-10">
+                        <div class="text-[10px] text-gray-400 uppercase font-bold tracking-widest">Telemetry</div>
+                        <div class="flex items-baseline gap-2">
+                            <span id="player-speed" class="text-xl font-black text-blue-400">0</span>
+                            <span class="text-[10px] text-blue-400 font-bold">KM/H</span>
+                        </div>
+                        <div class="flex items-baseline gap-2">
+                            <span id="player-g" class="text-xl font-black text-red-500">0.0</span>
+                            <span class="text-[10px] text-red-500 font-bold">G MAX</span>
+                        </div>
+                    </div>
+                    <!-- Export Button -->
+                    <button id="export-clip-btn" class="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-xl transition-all active:scale-95 z-10 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        EXPORT CLIP
+                    </button>
+                </div>
+                <div id="map" class="w-full h-64 rounded-2xl border-2 border-white/20 shadow-2xl z-10"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="legal-modal" class="fixed inset-0 bg-black/95 z-[60] hidden overflow-y-auto p-6 sm:p-12">
+        <div class="max-w-2xl mx-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h2 class="text-2xl font-black tracking-tighter">LEGAL & PRIVACY</h2>
+                <button onclick="document.getElementById('legal-modal').classList.add('hidden')" class="text-4xl text-gray-400 hover:text-white">&times;</button>
+            </div>
+            
+            <div class="space-y-8 text-gray-300 text-sm leading-relaxed">
+                <div>
+                    <h3 class="text-white font-bold mb-2 uppercase text-xs tracking-widest">As Of April 2026</h3>
+                </div>
+
+                <section>
+                    <h3 class="text-white font-black text-lg mb-4">1. Privacy Policy</h3>
+                    <ul class="space-y-4">
+                        <li><strong class="text-white">Privacy by Design:</strong> This application is built to be a "Zero-Knowledge" tool.</li>
+                        <li><strong class="text-white">Local Storage Only:</strong> All video, audio, and GPS data are processed and stored locally within your browser's temporary storage. No data is ever uploaded to our servers, stored remotely, or shared with third parties.</li>
+                        <li><strong class="text-white">Data Retention:</strong> The app operates on a rolling 5-minute cycle. Footage is automatically overwritten every five minutes. Once overwritten, data is permanently deleted and cannot be recovered by the developer or any third party.</li>
+                        <li><strong class="text-white">Permissions:</strong> Camera, Microphone, and Location access are used strictly for the functionality of the dashcam and remain on your device.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3 class="text-white font-black text-lg mb-4">2. Terms of Service</h3>
+                    <ul class="space-y-4">
+                        <li><strong class="text-white">Compliance with Law:</strong> You are solely responsible for ensuring your use of this dashcam complies with local privacy and recording laws. This includes "two-party consent" rules for audio recording and regulations regarding the recording of individuals in public spaces.</li>
+                        <li><strong class="text-white">Safe Operation:</strong> You agree not to interact with this application while operating a vehicle. The device must be mounted in a way that does not obstruct the driver’s view or violate local windshield obstruction statutes.</li>
+                        <li><strong class="text-white">User Ownership:</strong> You retain full ownership of any footage saved by this application.</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h3 class="text-white font-black text-lg mb-4">3. Liability Disclaimer</h3>
+                    <ul class="space-y-4">
+                        <li><strong class="text-white">"As-Is" Provision:</strong> This software is provided "as-is" without any warranty. Web applications are subject to browser crashes, mobile OS background task limits, and hardware overheating. We do not guarantee that all incidents will be captured or saved.</li>
+                        <li><strong class="text-white">Limitation of Liability:</strong> In no event shall the developer be liable for any direct, indirect, or consequential damages (including insurance disputes, legal fines, or loss of evidence) arising from the use of, or inability to use, this application.</li>
+                        <li><strong class="text-white">Not a Certified Safety Device:</strong> This app is a convenience tool and should not be relied upon as a primary safety or medical device.</li>
+                    </ul>
+                </section>
+            </div>
+
+            <button onclick="document.getElementById('legal-modal').classList.add('hidden')" class="mt-12 w-full bg-white text-black py-4 rounded-xl font-black uppercase tracking-widest hover:bg-gray-200 transition-colors">Close</button>
+        </div>
+    </div>
+
+    <script>
+        let db, mediaRecorder, stream;
+        let isRecording = false;
+        let isMuted = false;
+        let protectCurrent = false;
+        let protectNext = false;
+
+        // AI Variables
+        let aiEnabled = false;
+        let aiModel = null;
+
+        // Eco Mode Variables
+        let ecoMode = false;
+
+        // Parking Mode Variables
+        let parkingMode = false;
+        let stoppedStartTime = null;
+        let parkingRecording = false;
+        let lastFrameData = null;
+        const PARKING_STOP_DURATION = 180000; // 3 minutes of 0 speed to enter parking mode
+        const PARKING_FRAME_RATE = 5; // Low frame rate in parking mode
+        const MOTION_THRESHOLD = 30; // Sensitivity for motion detection
+
+        // Stabilization Variables
+        let stabEnabled = false;
+        let stabX = 0, stabY = 0, velX = 0, velY = 0;
+        let lastAccIG = {x: 0, y: 0};
+        let renderLoopId;
+        let currentSegmentSpeeds = [];
+        let currentSegmentRoute = [];
+        let currentSegmentMaxG = 0;
+
+        // Map Variables
+        let mapInstance = null;
+        let routeLayer = null;
+        let galleryMapInstance = null;
+        let galleryRouteLayers = [];
+        let currentPlayerUrl = null;
+        let currentClip = null;
+
+        // DB Initialization
+        const request = indexedDB.open("DashcamDB", 1);
+        request.onupgradeneeded = e => {
+            db = e.target.result;
+            db.createObjectStore("clips", { keyPath: "id", autoIncrement: true });
+        };
+        request.onsuccess = e => db = e.target.result;
+
+        // Sensor Setup
+        function initSensors() {
+            let lastSpeed = 0;
+            let lastSpeedTime = Date.now();
+
+            navigator.geolocation.watchPosition(pos => {
+                const speed = pos.coords.speed ? Math.round(pos.coords.speed * 3.6) : 0;
+                document.getElementById('speed-val').innerText = speed;
+                
+                // Sudden Braking Detection (e.g., > 15 km/h drop in 1 second)
+                const now = Date.now();
+                const dt = (now - lastSpeedTime) / 1000;
+                if (dt > 0.5 && dt < 2.0) {
+                    const deceleration = (lastSpeed - speed) / dt;
+                    if (deceleration > 15) { // 15 km/h per second is quite sharp
+                        console.log("Sudden Braking Detected!");
+                        triggerIncidentFlash("SUDDEN BRAKING");
+                    }
+                }
+                lastSpeed = speed;
+                lastSpeedTime = now;
+
+                if (speed === 0 && isRecording) {
+                    if (!stoppedStartTime) stoppedStartTime = Date.now();
+                    else if (!parkingMode && Date.now() - stoppedStartTime > PARKING_STOP_DURATION) {
+                        enterParkingMode();
+                    }
+                } else {
+                    stoppedStartTime = null;
+                    if (parkingMode) exitParkingMode();
+                }
+
+                if (isRecording) {
+                    currentSegmentSpeeds.push(speed);
+                    currentSegmentRoute.push([pos.coords.latitude, pos.coords.longitude]);
+                }
+            }, null, { enableHighAccuracy: true });
+
+            if (window.DeviceMotionEvent) {
+                window.addEventListener('devicemotion', e => {
+                    const acc = e.accelerationIncludingGravity;
+                    if (!acc || !acc.x) return;
+                    const g = (Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2) / 9.8).toFixed(1);
+                    document.getElementById('g-val').innerText = g;
+                    
+                    if (isRecording) {
+                        currentSegmentMaxG = Math.max(currentSegmentMaxG, parseFloat(g));
+                    }
+                    
+                    if (g > 3.0) {
+                        triggerIncidentFlash();
+                        if (parkingMode && !parkingRecording) {
+                            startParkingEvent("IMPACT");
+                        }
+                    }
+
+                    // Stabilization Algorithm (High-pass filter & Spring-Damper)
+                    if (stabEnabled) {
+                        let ax = 0, ay = 0;
+                        if (e.acceleration && e.acceleration.x !== null) {
+                            ax = e.acceleration.x;
+                            ay = e.acceleration.y;
+                        } else {
+                            const alpha = 0.8;
+                            lastAccIG.x = alpha * lastAccIG.x + (1 - alpha) * acc.x;
+                            lastAccIG.y = alpha * lastAccIG.y + (1 - alpha) * acc.y;
+                            ax = acc.x - lastAccIG.x;
+                            ay = acc.y - lastAccIG.y;
+                        }
+
+                        velX = (velX + ax) * 0.8;
+                        velY = (velY + ay) * 0.8;
+                        stabX = (stabX + velX) * 0.85;
+                        stabY = (stabY + velY) * 0.85;
+
+                        const maxShift = 60;
+                        stabX = Math.max(-maxShift, Math.min(maxShift, stabX));
+                        stabY = Math.max(-maxShift, Math.min(maxShift, stabY));
+                    }
+                });
+            }
+        }
+
+        function triggerIncidentFlash(reason = "INCIDENT SAVED") {
+            document.body.style.boxShadow = "inset 0 0 100px red";
+            setTimeout(() => document.body.style.boxShadow = "none", 500);
+            
+            protectCurrent = true;
+            protectNext = true;
+            
+            const statusText = document.getElementById('status-text');
+            statusText.innerText = reason;
+            statusText.classList.add('text-red-500');
+            setTimeout(() => {
+                if (isRecording) {
+                    statusText.innerText = parkingMode ? "PARKING MODE" : "RECORDING";
+                    statusText.classList.remove('text-red-500');
+                } else {
+                    statusText.innerText = "STANDBY";
+                    statusText.classList.remove('text-red-500');
+                }
+            }, 3000);
+        }
+
+        function initBatteryMonitor() {
+            if ('getBattery' in navigator) {
+                navigator.getBattery().then(battery => {
+                    const updateBatteryStatus = () => {
+                        if (battery.level <= 0.20 && !battery.charging) {
+                            if (!ecoMode) toggleEcoMode(true);
+                        } else if (battery.charging && battery.level > 0.20) {
+                            if (ecoMode) toggleEcoMode(false);
+                        }
+                    };
+                    updateBatteryStatus();
+                    battery.addEventListener('levelchange', updateBatteryStatus);
+                    battery.addEventListener('chargingchange', updateBatteryStatus);
+                });
+            }
+        }
+
+        function toggleEcoMode(forceState = null) {
+            ecoMode = forceState !== null ? forceState : !ecoMode;
+            const statusEl = document.getElementById('eco-status');
+            statusEl.innerText = ecoMode ? "ON" : "OFF";
+            statusEl.className = ecoMode ? "text-xs sm:text-sm font-bold text-green-400" : "text-xs sm:text-sm font-bold text-gray-500";
+            
+            if (stream && stream.getVideoTracks().length > 0) {
+                const track = stream.getVideoTracks()[0];
+                const constraints = ecoMode ? 
+                    { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 15 } } : 
+                    { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } };
+                
+                track.applyConstraints(constraints).catch(e => console.log("Constraint error:", e));
+            }
+        }
+
+        // Camera Initialization
+        async function startApp() {
+            try {
+                // High Quality Video Configuration (Optimized 1080p High-Frame)
+                const constraints = { 
+                    video: { 
+                        facingMode: "environment", 
+                        width: { ideal: 1920 }, 
+                        height: { ideal: 1080 }, 
+                        frameRate: { ideal: 60, min: 30 },
+                        resizeMode: 'none'
+                    },
+                    audio: { 
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    } 
+                };
+
+                // Adjust for Eco Mode if needed
+                if (ecoMode) {
+                    constraints.video.frameRate = { ideal: 15 };
+                }
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                document.getElementById('viewfinder').srcObject = stream;
+                initSensors();
+                initBatteryMonitor();
+                
+                // Start render loop for motion detection/stabilization
+                if (!renderLoopId) renderLoop();
+
+                // Wake Lock to keep screen on (wrap in its own try/catch so it doesn't break setup)
+                if ('wakeLock' in navigator) { 
+                    try {
+                        await navigator.wakeLock.request('screen'); 
+                    } catch (wlErr) {
+                        console.warn("Wake lock not supported or denied:", wlErr);
+                    }
+                }
+            } catch (err) {
+                console.error("Camera/Mic Error:", err);
+                alert("Could not access camera/microphone. Error: " + err.message + "\n\nPlease ensure permissions are granted.");
+            }
+        }
+
+        function stopApp() {
+            if (isRecording) {
+                toggleRecording(); // Stop recording first
+            }
+            
+            if (aiEnabled) {
+                stopAI();
+            }
+
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+
+            document.getElementById('viewfinder').srcObject = null;
+            document.getElementById('setup-screen').classList.remove('hidden');
+            
+            // Reset UI
+            document.getElementById('status-text').innerText = "STANDBY";
+            document.getElementById('rec-indicator').classList.add('hidden');
+            
+            const startBtn = document.getElementById('start-journey-btn');
+            startBtn.innerText = "START JOURNEY";
+            startBtn.classList.remove('animate-pulse');
+        }
+
+        function renderLoop() {
+            if (!stream) return;
+            const video = document.getElementById('viewfinder');
+            const canvas = document.getElementById('stab-canvas');
+            const ctx = canvas.getContext('2d');
+
+            if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+            }
+
+            // Motion Detection in Parking Mode
+            if (parkingMode && !parkingRecording && video.videoWidth > 0) {
+                const motionCanvas = document.createElement('canvas');
+                motionCanvas.width = 64;
+                motionCanvas.height = 48;
+                const mCtx = motionCanvas.getContext('2d');
+                mCtx.drawImage(video, 0, 0, 64, 48);
+                const currentFrame = mCtx.getImageData(0, 0, 64, 48).data;
+                
+                if (lastFrameData) {
+                    let diff = 0;
+                    for (let i = 0; i < currentFrame.length; i += 4) {
+                        diff += Math.abs(currentFrame[i] - lastFrameData[i]);
+                    }
+                    const avgDiff = diff / (currentFrame.length / 4);
+                    if (avgDiff > MOTION_THRESHOLD) {
+                        startParkingEvent("MOTION");
+                    }
+                }
+                lastFrameData = currentFrame;
+            }
+
+            if (isRecording && stabEnabled && canvas.width > 0) {
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.save();
+                ctx.translate(canvas.width / 2, canvas.height / 2);
+                ctx.scale(1.15, 1.15); // 15% zoom to hide borders
+                
+                // Apply stabilization offset (inverted to counter movement)
+                ctx.translate(-canvas.width / 2 - stabX * 5, -canvas.height / 2 + stabY * 5);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+            
+            const delay = parkingMode && !parkingRecording ? 500 : (ecoMode ? 66 : 0);
+            if (delay > 0) {
+                setTimeout(() => {
+                    renderLoopId = requestAnimationFrame(renderLoop);
+                }, delay);
+            } else {
+                renderLoopId = requestAnimationFrame(renderLoop);
+            }
+        }
+
+        async function toggleRecording() {
+            if (!stream) {
+                alert("Camera stream not available. Please ensure permissions are granted.");
+                return;
+            }
+
+            if (!isRecording) {
+                isRecording = true;
+                if (!parkingMode) {
+                    startContinuousRecording();
+                }
+                const btn = document.getElementById('start-btn');
+                btn.innerText = "STOP";
+                btn.classList.replace('bg-red-700', 'bg-gray-800');
+                document.getElementById('status-text').innerText = "RECORDING";
+            } else {
+                isRecording = false;
+                stopContinuousRecording();
+                const btn = document.getElementById('start-btn');
+                btn.innerText = "REC";
+                btn.classList.replace('bg-gray-800', 'bg-red-700');
+                document.getElementById('status-text').innerText = "STANDBY";
+            }
+        }
+
+        function startContinuousRecording() {
+            const recInd = document.getElementById('rec-indicator');
+            let recordStream = stream;
+            
+            // Set resolution for recording
+            const video = document.getElementById('viewfinder');
+            const recordingWidth = video.videoWidth || (ecoMode ? 1280 : 1920);
+            const recordingHeight = video.videoHeight || (ecoMode ? 720 : 1080);
+
+            if (stabEnabled) {
+                const canvas = document.getElementById('stab-canvas');
+                canvas.width = recordingWidth;
+                canvas.height = recordingHeight;
+                
+                recordStream = canvas.captureStream(parkingMode ? PARKING_FRAME_RATE : (ecoMode ? 15 : 60));
+                if (stream.getAudioTracks().length > 0) {
+                    recordStream.addTrack(stream.getAudioTracks()[0]);
+                }
+                renderLoopId = requestAnimationFrame(renderLoop);
+            }
+
+            // Adaptive Bitrate Logic
+            // 4K (3840x2160) -> 30-40 Mbps
+            // 1080p (1920x1080) -> 12-18 Mbps
+            // 720p (1280x720) -> 3-5 Mbps
+            let targetBitrate = 15000000; // Default 15 Mbps (1080p High)
+            if (ecoMode) {
+                targetBitrate = 3000000; // 3 Mbps (720p Eco)
+            } else if (recordingWidth >= 3840) {
+                targetBitrate = 35000000; // 35 Mbps (4K Peak)
+            }
+
+            const options = {
+                videoBitsPerSecond: targetBitrate,
+                audioBitsPerSecond: 128000
+            };
+
+            // Order of preference: MP4 (best hardware support) -> VP9 -> VP8
+            if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E')) {
+                options.mimeType = 'video/mp4;codecs=avc1.42E01E';
+            } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+                options.mimeType = 'video/mp4';
+            } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+                options.mimeType = 'video/webm;codecs=vp9';
+            } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+                options.mimeType = 'video/webm;codecs=vp8';
+            }
+
+            mediaRecorder = new MediaRecorder(recordStream, options);
+            mediaRecorder.ondataavailable = async e => {
+                const tx = db.transaction("clips", "readwrite");
+                const store = tx.objectStore("clips");
+                
+                const avgSpeed = currentSegmentSpeeds.length > 0 
+                    ? Math.round(currentSegmentSpeeds.reduce((a, b) => a + b, 0) / currentSegmentSpeeds.length) 
+                    : 0;
+                const route = [...currentSegmentRoute];
+                
+                currentSegmentSpeeds = []; // Reset for next segment
+                currentSegmentRoute = [];
+                const maxG = currentSegmentMaxG;
+                currentSegmentMaxG = 0;
+
+                const addReq = store.add({ 
+                    blob: e.data, 
+                    time: new Date().toLocaleString(),
+                    timestamp: Date.now(),
+                    isProtected: protectCurrent,
+                    avgSpeed: avgSpeed,
+                    route: route,
+                    maxGForce: maxG
+                });
+
+                addReq.onsuccess = (event) => {
+                    const id = event.target.result;
+                    enforceRollingLimit();
+                };
+
+                // Shift protection state for the next segment
+                protectCurrent = protectNext;
+                protectNext = false;
+            };
+            mediaRecorder.start(parkingMode ? 60000 : 300000); // 1-min in parking, 5-min normal
+            recInd.classList.remove('hidden');
+        }
+
+        function stopContinuousRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            if (renderLoopId) cancelAnimationFrame(renderLoopId);
+            document.getElementById('rec-indicator').classList.add('hidden');
+        }
+
+        function enterParkingMode() {
+            if (!isRecording || parkingMode) return;
+            parkingMode = true;
+            document.getElementById('parking-indicator').classList.remove('hidden');
+            document.getElementById('status-text').innerText = "PARKING MODE";
+            console.log("Entering Parking Mode...");
+            
+            stopContinuousRecording();
+        }
+
+        function exitParkingMode() {
+            if (!parkingMode) return;
+            parkingMode = false;
+            document.getElementById('parking-indicator').classList.add('hidden');
+            document.getElementById('status-text').innerText = "RECORDING";
+            console.log("Exiting Parking Mode...");
+            
+            if (isRecording) {
+                startContinuousRecording();
+            }
+        }
+
+        function startParkingEvent(type) {
+            if (parkingRecording) return;
+            parkingRecording = true;
+            protectCurrent = true; 
+            console.log(`Parking Event Detected: ${type}`);
+            
+            startContinuousRecording();
+            
+            // Record for 30 seconds then stop
+            setTimeout(() => {
+                if (parkingMode) {
+                    stopContinuousRecording();
+                }
+                parkingRecording = false;
+            }, 30000);
+        }
+
+        // Gallery Functions
+        async function openGallery() {
+            document.getElementById('gallery-modal').classList.remove('hidden');
+            renderGallery();
+        }
+
+        function renderGallery() {
+            const list = document.getElementById('clip-list');
+            list.innerHTML = "";
+            
+            const filterDate = document.getElementById('filter-date').value;
+            const filterProtected = document.getElementById('filter-protected').value;
+            const filterSpeed = parseInt(document.getElementById('filter-speed').value, 10);
+
+            const tx = db.transaction("clips", "readonly");
+            tx.objectStore("clips").getAll().onsuccess = e => {
+                let clips = e.target.result;
+                
+                // Sort descending (newest first)
+                clips.sort((a, b) => b.id - a.id);
+
+                // Apply filters
+                if (filterDate) {
+                    const filterParts = filterDate.split('-');
+                    const filterDateObj = new Date(filterParts[0], filterParts[1] - 1, filterParts[2]);
+                    const filterDateString = filterDateObj.toLocaleDateString();
+                    
+                    clips = clips.filter(c => {
+                        if (c.timestamp) {
+                            return new Date(c.timestamp).toLocaleDateString() === filterDateString;
+                        } else {
+                            return c.time.split(',')[0] === filterDateString;
+                        }
+                    });
+                }
+
+                if (filterProtected === 'protected') {
+                    clips = clips.filter(c => c.isProtected);
+                }
+
+                if (filterSpeed > 0) {
+                    clips = clips.filter(c => (c.avgSpeed || 0) >= filterSpeed);
+                }
+
+                const viewToggle = document.getElementById('gallery-view-toggle').value;
+                const mapContainer = document.getElementById('gallery-map');
+
+                if (clips.length === 0) {
+                    list.innerHTML = "<div class='text-gray-500 text-center py-8 font-bold'>No clips match the current filters.</div>";
+                    mapContainer.classList.add('hidden');
+                    list.classList.remove('hidden');
+                    return;
+                }
+
+                if (viewToggle === 'map') {
+                    list.classList.add('hidden');
+                    mapContainer.classList.remove('hidden');
+                    
+                    if (!galleryMapInstance) {
+                        galleryMapInstance = L.map('gallery-map').setView([0, 0], 13);
+                        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '&copy; OpenStreetMap contributors'
+                        }).addTo(galleryMapInstance);
+                    }
+                    
+                    galleryRouteLayers.forEach(layer => galleryMapInstance.removeLayer(layer));
+                    galleryRouteLayers = [];
+                    let allBounds = L.latLngBounds([]);
+                    
+                    clips.forEach(clip => {
+                        if (clip.route && clip.route.length > 0) {
+                            const color = clip.isProtected ? '#dc2626' : '#2563eb'; // red-600 or blue-600
+                            const polyline = L.polyline(clip.route, {color: color, weight: 5, opacity: 0.8}).addTo(galleryMapInstance);
+                            
+                            polyline.bindPopup(`
+                                <div class="text-black text-center min-w-[120px]">
+                                    <div class="font-bold mb-2 text-xs">${clip.time}</div>
+                                    <div class="flex gap-1">
+                                        <button class="bg-blue-600 text-white px-2 py-1 rounded font-bold text-xs flex-1 hover:bg-blue-500" onclick="playClip(${clip.id})">PLAY</button>
+                                        <button class="bg-red-600 text-white px-2 py-1 rounded font-bold text-xs flex-1 hover:bg-red-500" onclick="deleteClip(${clip.id})">DEL</button>
+                                    </div>
+                                </div>
+                            `);
+                            
+                            galleryRouteLayers.push(polyline);
+                            allBounds.extend(polyline.getBounds());
+                        }
+                    });
+                    
+                    if (galleryRouteLayers.length > 0) {
+                        galleryMapInstance.fitBounds(allBounds, { padding: [20, 20] });
+                    }
+                    
+                    setTimeout(() => galleryMapInstance.invalidateSize(), 100);
+                    
+                } else {
+                    mapContainer.classList.add('hidden');
+                    list.classList.remove('hidden');
+                    
+                    clips.forEach(clip => {
+                        const item = document.createElement('div');
+                        const isProtected = clip.isProtected;
+                        const borderClass = isProtected ? "border-2 border-red-600 bg-red-900/20" : "border border-white/10";
+                        const badge = isProtected ? `<span class="bg-red-600 text-white text-[10px] px-2 py-1 rounded font-black tracking-widest mt-1 inline-block">PROTECTED</span>` : "";
+                        const speedBadge = clip.avgSpeed !== undefined ? `<span class="bg-blue-900/50 text-blue-300 text-[10px] px-2 py-1 rounded font-black mt-1 inline-block ml-2">~${clip.avgSpeed} km/h</span>` : "";
+                        
+                        item.className = `glass p-5 rounded-2xl flex justify-between items-center ${borderClass}`;
+                        item.innerHTML = `<div class="flex flex-col items-start"><span class="font-mono font-bold">${clip.time}</span><div>${badge}${speedBadge}</div></div> 
+                                          <div class="flex gap-2">
+                                              <button class="bg-blue-600 px-4 py-2 rounded-xl font-bold hover:bg-blue-500 transition-colors" onclick="playClip(${clip.id})">VIEW</button>
+                                              <button class="bg-red-600 px-4 py-2 rounded-xl font-bold hover:bg-red-500 transition-colors" onclick="deleteClip(${clip.id})">DEL</button>
+                                          </div>`;
+                        list.appendChild(item);
+                    });
+                }
+            };
+        }
+
+        async function playClip(id) {
+            const tx = db.transaction("clips", "readonly");
+            tx.objectStore("clips").get(id).onsuccess = e => {
+                const clip = e.target.result;
+                currentClip = clip;
+                
+                if (currentPlayerUrl) {
+                    URL.revokeObjectURL(currentPlayerUrl);
+                }
+                currentPlayerUrl = URL.createObjectURL(clip.blob);
+                
+                const player = document.getElementById('player');
+                const playerContainer = document.getElementById('player-container');
+                
+                // Update Telemetry
+                document.getElementById('player-speed').innerText = clip.avgSpeed || 0;
+                document.getElementById('player-g').innerText = (clip.maxGForce || 0).toFixed(1);
+
+                player.src = currentPlayerUrl;
+                playerContainer.classList.remove('hidden');
+                player.play();
+                player.onended = () => {
+                    URL.revokeObjectURL(currentPlayerUrl);
+                    currentPlayerUrl = null;
+                };
+
+                // Map Logic
+                if (!mapInstance) {
+                    mapInstance = L.map('map').setView([0, 0], 13);
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; OpenStreetMap contributors'
+                    }).addTo(mapInstance);
+                }
+
+                if (routeLayer) {
+                    mapInstance.removeLayer(routeLayer);
+                }
+
+                if (clip.route && clip.route.length > 0) {
+                    document.getElementById('map').style.display = 'block';
+                    routeLayer = L.polyline(clip.route, {color: 'red', weight: 5}).addTo(mapInstance);
+                    mapInstance.fitBounds(routeLayer.getBounds());
+                    setTimeout(() => mapInstance.invalidateSize(), 100);
+                } else {
+                    document.getElementById('map').style.display = 'none';
+                }
+            };
+        }
+
+        function closeGallery() { 
+            document.getElementById('gallery-modal').classList.add('hidden');
+            const player = document.getElementById('player');
+            player.pause();
+            if (currentPlayerUrl) {
+                URL.revokeObjectURL(currentPlayerUrl);
+                currentPlayerUrl = null;
+            }
+            currentClip = null;
+            document.getElementById('player-container').classList.add('hidden');
+        }
+
+        function downloadCurrentClip() {
+            if (!currentClip || !currentClip.blob) return;
+            
+            const url = URL.createObjectURL(currentClip.blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            // Generate a clean filename and check extension
+            const timestamp = currentClip.time.replace(/[/, :]/g, '-');
+            const isMp4 = currentClip.blob.type.includes('mp4');
+            const extension = isMp4 ? 'mp4' : 'webm';
+            a.download = `ApexLense_${timestamp}.${extension}`;
+            
+            document.body.appendChild(a);
+            a.click();
+            
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        }
+
+        function enforceRollingLimit() {
+            const tx = db.transaction("clips", "readwrite");
+            const store = tx.objectStore("clips");
+            store.getAll().onsuccess = (e) => {
+                let clips = e.target.result;
+                let unprotected = clips.filter(c => !c.isProtected);
+                unprotected.sort((a, b) => a.timestamp - b.timestamp);
+                
+                // Keep last 2 unprotected clips (10 mins rolling buffer)
+                const MAX_CLIPS = 2;
+                if (unprotected.length > MAX_CLIPS) {
+                    const toDelete = unprotected.slice(0, unprotected.length - MAX_CLIPS);
+                    toDelete.forEach(c => {
+                        store.delete(c.id);
+                    });
+                }
+            };
+        }
+
+        window.deleteClip = function(id) {
+            if (!confirm("Are you sure you want to delete this clip?")) return;
+            const tx = db.transaction("clips", "readwrite");
+            tx.objectStore("clips").delete(id);
+            tx.oncomplete = () => {
+                if (galleryMapInstance) galleryMapInstance.closePopup();
+                renderGallery();
+            };
+        };
+
+        // AI Car Detection Logic
+        async function initAI() {
+            const statusEl = document.getElementById('ai-status');
+            if (!aiModel) {
+                statusEl.innerText = "LOAD...";
+                statusEl.classList.replace('text-gray-500', 'text-yellow-400');
+                try {
+                    // Load the COCO-SSD model
+                    aiModel = await cocoSsd.load();
+                } catch (e) {
+                    console.error("AI Load Error:", e);
+                    statusEl.innerText = "ERR";
+                    statusEl.classList.replace('text-yellow-400', 'text-red-500');
+                    aiEnabled = false;
+                    return;
+                }
+            }
+            
+            statusEl.innerText = "ON";
+            statusEl.className = "text-sm font-bold text-green-400";
+            document.getElementById('car-alert').classList.remove('hidden');
+            runAI();
+        }
+
+        function stopAI() {
+            document.getElementById('ai-status').innerText = "OFF";
+            document.getElementById('ai-status').className = "text-sm font-bold text-gray-500";
+            document.getElementById('car-alert').classList.add('hidden');
+        }
+
+        async function runAI() {
+            if (!aiEnabled || !aiModel) return;
+            
+            const video = document.getElementById('viewfinder');
+            if (video.readyState >= 2) { // HAVE_CURRENT_DATA
+                try {
+                    const predictions = await aiModel.detect(video);
+                    
+                    // Filter for vehicles
+                    const cars = predictions.filter(p => ['car', 'truck', 'bus'].includes(p.class));
+                    const count = cars.length;
+                    
+                    document.getElementById('car-count').innerText = count;
+                    const alertEl = document.getElementById('car-alert');
+                    
+                    if (count > 0) {
+                        alertEl.classList.add('bg-yellow-600/40', 'border-yellow-500');
+                        alertEl.classList.remove('border-white/15');
+                    } else {
+                        alertEl.classList.remove('bg-yellow-600/40', 'border-yellow-500');
+                        alertEl.classList.add('border-white/15');
+                    }
+
+                    // Pedestrian Detection
+                    const pedestrians = predictions.filter(p => p.class === 'person' && p.score > 0.5);
+                    const pedAlertEl = document.getElementById('pedestrian-alert');
+                    
+                    if (pedestrians.length > 0) {
+                        pedAlertEl.classList.remove('hidden');
+                        
+                        // If pedestrian is in the center 40% of the screen, trigger protected recording
+                        const centerPed = pedestrians.find(p => {
+                            const [x, y, width, height] = p.bbox;
+                            const centerX = x + width / 2;
+                            const videoCenterX = video.videoWidth / 2;
+                            return Math.abs(centerX - videoCenterX) < (video.videoWidth * 0.2);
+                        });
+
+                        if (centerPed) {
+                            triggerIncidentFlash("PEDESTRIAN CROSSING");
+                        }
+                    } else {
+                        pedAlertEl.classList.add('hidden');
+                    }
+
+                } catch (e) {
+                    console.error("AI Detection Error:", e);
+                }
+            }
+            
+            if (aiEnabled) {
+                setTimeout(runAI, ecoMode ? 3000 : 1000); // Run at 1 FPS normally, or 0.33 FPS in Eco Mode
+            }
+        }
+
+        // Function to open What3Words based on current GPS
+        function openWhat3Words() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    
+                    // This URL format tells W3W to find the 3 words for these coordinates
+                    const w3wUrl = `https://what3words.com/${lat},${lng}`;
+                    
+                    // Opens in a new tab so your dashcam keeps recording in the background
+                    window.open(w3wUrl, '_blank');
+                }, (err) => {
+                    alert("GPS Error: Could not get precise location for W3W.");
+                }, { enableHighAccuracy: true });
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+        }
+
+        // Listeners
+        document.getElementById('start-btn').addEventListener('click', toggleRecording);
+        document.getElementById('gallery-btn').addEventListener('click', openGallery);
+        document.getElementById('eco-toggle').addEventListener('click', () => toggleEcoMode());
+        document.getElementById('apply-filters-btn').addEventListener('click', renderGallery);
+        document.getElementById('gallery-view-toggle').addEventListener('change', renderGallery);
+        document.getElementById('w3w-btn').addEventListener('click', openWhat3Words);
+        
+        document.getElementById('hide-ui-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.body.classList.add('ui-hidden');
+        });
+
+        document.body.addEventListener('click', (e) => {
+            if (document.body.classList.contains('ui-hidden')) {
+                document.body.classList.remove('ui-hidden');
+            }
+        });
+        
+        document.getElementById('ai-toggle').addEventListener('click', () => {
+            aiEnabled = !aiEnabled;
+            if (aiEnabled) initAI();
+            else stopAI();
+        });
+
+        document.getElementById('stop-app-btn').addEventListener('click', stopApp);
+
+        document.getElementById('export-clip-btn').addEventListener('click', downloadCurrentClip);
+
+        document.getElementById('stab-toggle').addEventListener('click', () => {
+            if (isRecording) {
+                alert("Please stop recording to toggle stabilization.");
+                return;
+            }
+            stabEnabled = !stabEnabled;
+            const statusEl = document.getElementById('stab-status');
+            statusEl.innerText = stabEnabled ? "ON" : "OFF";
+            statusEl.className = stabEnabled ? "text-sm font-bold text-green-400" : "text-sm font-bold text-gray-500";
+        });
+
+        document.getElementById('mute-btn').addEventListener('click', () => {
+            if (!stream) return;
+            isMuted = !isMuted;
+            stream.getAudioTracks()[0].enabled = !isMuted;
+            document.getElementById('mute-icon').innerText = isMuted ? "🔇" : "🎤";
+        });
+
+        // Re-sync on rotation
+        window.addEventListener("orientationchange", () => {
+            if (stream) setTimeout(startApp, 500);
+        });
+
+        document.getElementById('start-journey-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('start-journey-btn');
+            btn.innerText = "INITIALIZING...";
+            btn.classList.add('animate-pulse');
+            
+            await startApp();
+            
+            if (stream) {
+                document.getElementById('setup-screen').classList.add('hidden');
+            } else {
+                btn.innerText = "START JOURNEY";
+                btn.classList.remove('animate-pulse');
+            }
+        });
+
+        if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js'); }
+
+        // PWA Installation Logic
+        let deferredPrompt;
+        const installBtn = document.getElementById('install-pwa-btn');
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            // Prevent the mini-infobar from appearing on mobile
+            e.preventDefault();
+            // Stash the event so it can be triggered later.
+            deferredPrompt = e;
+        });
+
+        installBtn.addEventListener('click', async () => {
+            if (deferredPrompt) {
+                // Show the install prompt
+                deferredPrompt.prompt();
+                // Wait for the user to respond to the prompt
+                const { outcome } = await deferredPrompt.userChoice;
+                if (outcome === 'accepted') {
+                    console.log('User accepted the install prompt');
+                }
+                // We've used the prompt, and can't use it again, throw it away
+                deferredPrompt = null;
+            } else {
+                alert("To install the app, please tap your browser's Share icon (iOS) or Menu icon (Android/Desktop) and select 'Add to Home Screen' or 'Install App'.");
+            }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            // Clear the deferredPrompt so it can be garbage collected
+            deferredPrompt = null;
+            console.log('PWA was installed');
+        });
+
+        document.getElementById('legal-btn').addEventListener('click', () => {
+            document.getElementById('legal-modal').classList.remove('hidden');
+        });
+    </script>
+    <script>
+        const dashTips = [
+            { t: "A dirty windshield causes 'halos' in night footage. Clean inside/out weekly.", c: "Get Glass Cleaner", l: "Stoner+Invisible+Glass" },
+            { t: "Dashboard glare hides license plates. A CPL filter is a dash-cam game changer.", c: "Check CPL Filters", l: "CPL+filter+for+dash+cam" },
+            { t: "Polarized sunglasses aren't just for style; they reveal hazards hidden by glare.", c: "Shop Driving Glasses", l: "polarized+driving+sunglasses" },
+            { t: "Night driving strains the eyes. Keep yellow-tinted glasses in your glovebox.", c: "Get Night Vision Glasses", l: "night+driving+glasses" },
+            { t: "Foggy mirrors? Use water-repellent spray to ensure a clear side view.", c: "Get Rain-X Mirror Spray", l: "Rain-X+Anti-Fog" },
+            { t: "Video recording is power-heavy. A high-wattage adapter prevents battery drain.", c: "Get 4.8A Car Charger", l: "Anker+4.8A+Car+Charger" },
+            { t: "Frayed cables stop recordings mid-trip. Use a braided cable for durability.", c: "Shop Braided Cables", l: "braided+usb+c+cable+fast+charge" },
+            { t: "Long cables interfere with gear shifters. Use a coiled cable to stay tidy.", c: "Get Coiled Cable", l: "coiled+charging+cable+car" },
+            { t: "Don’t let a dead battery strand you. A portable jump starter is a lifesaver.", c: "Get Jump Starter", l: "NOCO+Boost+Plus+GB40" },
+            { t: "Phone getting hot? A magnetic mount with a fan prevents thermal shutdown.", c: "Check Phone Coolers", l: "phone+cooler+for+car" },
+            { t: "Vibrations ruin footage. A 'Fixed-Arm' mount is steadier than Gooseneck styles.", c: "Shop Sturdy Mounts", l: "iOttie+Easy+One+Touch" },
+            { t: "Dashboard mounts can melt in summer. Use a vent-clip to keep the phone cool.", c: "Get Air Vent Mount", l: "Lisen+vent+phone+mount" },
+            { t: "Using a case? A MagSafe-compatible mount offers the fastest 'snap-and-go'.", c: "Get MagSafe Mount", l: "MagSafe+car+mount+charger" },
+            { t: "Suction cups lose grip over time. Use a sticky-gel pad for a vibration-free hold.", c: "Shop Gel-Suction Mounts", l: "sticky+pad+car+mount" },
+            { t: "Recording for Uber or Lyft? A Dual-Pivot mount tracks the road and the cabin.", c: "Get Rideshare Mount", l: "rideshare+phone+mount+dual" },
+            { t: "Check tire pressure monthly. Low PSI reduces gas mileage and braking safety.", c: "Get Digital Tire Gauge", l: "digital+tire+pressure+gauge" },
+            { t: "Streaky wipers? Replace every 6 months for clear rainy-day evidence.", c: "Shop Bosch Wipers", l: "Bosch+Icon+Wiper+Blades" },
+            { t: "Brake dust corrodes rims. A spray-on cleaner keeps your 'Apex' look sharp.", c: "Get Wheel Cleaner", l: "Chemical+Guys+Wheel+Cleaner" },
+            { t: "Yellow headlights? Restoring them increases nighttime visibility by 200%.", c: "Get Restoration Kit", l: "3M+Headlight+Restoration" },
+            { t: "Use an OBD2 scanner to find out why your 'Check Engine' light is actually on.", c: "Shop OBD2 Scanners", l: "BlueDriver+OBD2" },
+            { t: "Long drive? A lumbar support cushion prevents back pain during 4+ hour trips.", c: "Get Lumbar Pillow", l: "car+lumbar+support+cushion" },
+            { t: "Don't let crumbs ruin your interior. A portable vacuum is a daily driver must.", c: "Get Portable Vacuum", l: "ThisWorx+Car+Vacuum" },
+            { t: "Losing items? A 'Seat Gap Filler' stops phones from falling into the abyss.", c: "Get Seat Gap Filler", l: "Drop+Stop+Seat+Gap+Filler" },
+            { t: "Organizing a mess? A collapsible organizer keeps your trunk gear from sliding.", c: "Shop Trunk Organizers", l: "Fortem+Trunk+Organizer" },
+            { t: "Back-seat organizers with tablet holders keep the 'Are we there yet?' away.", c: "Get Backseat Organizer", l: "car+backseat+organizer" },
+            { t: "In a crash, doors can jam. Keep a window breaker tool within arm's reach.", c: "Get Resqme Tool", l: "resqme+seatbelt+cutter" },
+            { t: "Flat tires happen. A portable air compressor can get you to the shop safely.", c: "Get Tire Inflator", l: "portable+tire+inflator" },
+            { t: "Stay visible if you break down. LED flares are safer than traditional fire flares.", c: "Shop LED Flares", l: "LED+road+flares" },
+            { t: "Minor scrapes occur. Keep a basic First Aid kit in your car at all times.", c: "Get First Aid Kit", l: "car+first+aid+kit" },
+            { t: "Stranded in the cold? An emergency thermal blanket can be a lifesaver.", c: "Get Mylar Blankets", l: "emergency+mylar+blankets" },
+            { t: "Summer heat cracks dashes. A reflective sunshade keeps the car 30°F cooler.", c: "Get Windshield Sunshade", l: "EcoNour+Car+Sun+Shade" },
+            { t: "Winter driving? Keep a heavy-duty ice scraper in the car before frost hits.", c: "Shop Ice Scrapers", l: "Mallory+Ice+Scraper" },
+            { t: "Rain-X makes water bead off at 40mph. You might not even need wipers.", c: "Get Rain-X Repellent", l: "Rain-X+Original" },
+            { t: "Keep work gloves in your trunk. Changing a tire is better with clean hands.", c: "Get Mechanix Gloves", l: "Mechanix+Wear+Gloves" },
+            { t: "Frozen locks are a nightmare. Keep a small de-icer bottle in your pocket.", c: "Get Windshield De-Icer", l: "Prestone+De-Icer" },
+            { t: "Car shaking at high speeds? Your wheels might be out of balance.", c: "Check Balancing Tools", l: "wheel+balancing+weight" },
+            { t: "Fogged windows are a risk. A dehumidifier bag on the dash absorbs moisture.", c: "Get Car Dehumidifier", l: "pingi+car+dehumidifier" },
+            { t: "Blind spots cause accidents. Small convex mirrors can save your fender.", c: "Get Blind Spot Mirrors", l: "blind+spot+mirrors" },
+            { t: "If your AC smells musty, it's time to replace your cabin air filter.", c: "Shop Air Filters", l: "FRAM+Cabin+Air+Filter" },
+            { t: "Safe driving starts with clean mats. Non-slip mats keep pedals clear.", c: "Get All-Weather Mats", l: "WeatherTech+Floor+Mats" },
+            { t: "Protect leather seats from UV damage with a specialized conditioner.", c: "Get Leather Conditioner", l: "Leather+Honey" },
+            { t: "Losing your keys? Use an AirTag and a keychain to find them instantly.", c: "Get an Apple AirTag", l: "Apple+AirTag" },
+            { t: "Keep tech clean. A 'Gel' detailer gets dust out of hard-to-reach vents.", c: "Get Car Cleaning Gel", l: "cleaning+gel+for+car" },
+            { t: "Always carry a flashlight. USB-rechargeable is better than old batteries.", c: "Shop Flashlights", l: "Anker+Rechargeable+Flashlight" },
+            { t: "Parking in tight spots? Add a wireless backup camera to any car easily.", c: "Shop Backup Cameras", l: "Auto-Vox+Wireless+Backup+Camera" },
+            { t: "Keep insurance info organized in a protective glovebox folder.", c: "Get Document Holder", l: "car+document+holder" },
+            { t: "Using Apex Lense for hours? Keep battery healthy with a smart cable.", c: "Shop Smart Chargers", l: "smart+car+charger" },
+            { t: "Don't let your car's interior fade. UV protectant works like sunscreen.", c: "Get UV Protectant", l: "303+Aerospace+Protectant" },
+            { t: "Protect phone sensors from engine vibrations with a dampening mount.", c: "Get Vibration Dampener", l: "phone+mount+vibration+dampener" },
+            { t: "Never miss a moment. Hardwire your device for 24/7 parking protection.", c: "Get Hardwire Kit", l: "dash+cam+hardwire+kit" }
+        ];
+
+        function updateDailyTip() {
+            const affiliateId = "motwallet76-21";
+            
+            // We calculate days since Epoch (Jan 1, 1970)
+            const now = new Date();
+            const daysSinceEpoch = Math.floor(now.getTime() / (1000 * 60 * 60 * 24));
+            
+            // Modulo 50 ensures it stays between index 0 and 49, then resets
+            const index = daysSinceEpoch % dashTips.length;
+            const todayTip = dashTips[index];
+            
+            // Update the UI
+            document.getElementById('tip-text').innerText = todayTip.t;
+            document.getElementById('tip-link').innerText = todayTip.c + " →";
+            document.getElementById('tip-link').href = `https://www.amazon.co.uk/s?k=${todayTip.l}&tag=${affiliateId}`;
+        }
+
+        // Run on page load
+        updateDailyTip();
+    </script>
+</body>
+</html>

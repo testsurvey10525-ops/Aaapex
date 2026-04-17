@@ -1,0 +1,10 @@
+{
+  "name": "Apex Lense",
+  "description": "A high-performance dashcam PWA with local storage, AI detection, and parking mode.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}

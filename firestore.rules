@@ -1,0 +1,97 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId} (Firebase Auth UID)
+// Fields:
+//   - uid: string (required) - The unique Firebase Auth UID.
+//   - email: string (required) - The user's email address.
+//   - displayName: string (optional) - The user's display name.
+//   - photoURL: string (optional) - The user's profile photo URL.
+//   - role: string (required, enum: ['user', 'admin']) - The user's role.
+//   - createdAt: timestamp (optional) - When the user was created.
+//
+// Collection: clips
+// Document ID: {clipId}
+// Fields:
+//   - uid: string (required) - The owner's UID.
+//   - time: string (optional) - Formatted time string.
+//   - timestamp: number (required) - Epoch timestamp.
+//   - isProtected: bool (optional) - Whether the clip is protected.
+//   - avgSpeed: number (optional) - Average speed during segment.
+//   - maxGForce: number (optional) - Maximum G-force during segment.
+//   - route: list (optional) - GPS route points.
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "testsurvey10525@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['user', 'admin'];
+    }
+
+    function isValidClip(data) {
+      return hasOnlyAllowedFields(['uid', 'time', 'timestamp', 'isProtected', 'avgSpeed', 'maxGForce', 'route']) &&
+             data.uid == request.auth.uid &&
+             data.timestamp is number;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) && request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /clips/{clipId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidClip(request.resource.data);
+      allow update: if isAuthenticated() && isValidClip(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isDocOwner() || isAdmin();
+    }
+  }
+}

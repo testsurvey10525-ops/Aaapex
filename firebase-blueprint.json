@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Represents a user of the application.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique Firebase Auth UID." },
+        "email": { "type": "string", "description": "The user's email address." },
+        "displayName": { "type": "string", "description": "The user's display name." },
+        "photoURL": { "type": "string", "description": "The user's profile photo URL." },
+        "role": { "type": "string", "enum": ["user", "admin"], "description": "The user's role." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user was created." }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "ClipMetadata": {
+      "title": "ClipMetadata",
+      "description": "Metadata for a recorded clip (actual video is stored locally).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The owner's UID." },
+        "time": { "type": "string", "description": "Formatted time string." },
+        "timestamp": { "type": "number", "description": "Epoch timestamp." },
+        "isProtected": { "type": "boolean", "description": "Whether the clip is protected." },
+        "avgSpeed": { "type": "number", "description": "Average speed during segment." },
+        "maxGForce": { "type": "number", "description": "Maximum G-force during segment." },
+        "route": { "type": "array", "items": { "type": "array", "items": { "type": "number" } }, "description": "GPS route points." }
+      },
+      "required": ["uid", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data."
+    },
+    "/clips/{clipId}": {
+      "schema": "ClipMetadata",
+      "description": "Metadata for recorded clips."
+    }
+  }
+}
